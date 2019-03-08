@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# pycharm
+.idea/
+
+# python
+**/__pycache__
+
+# static files
+static/
