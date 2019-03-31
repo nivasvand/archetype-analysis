@@ -1,5 +1,6 @@
 from numpy import *
 
+
 def createC1(dataSet):
     C1 = []
     for transaction in dataSet:
@@ -109,8 +110,9 @@ def getSubset(fromList, toList):
                 getSubset(tt, toList)
 
 
-def calcConf(freqSet, H, supportData, ruleList, minConf=0.7):
+def calcConf(freqSet, H, supportData, ruleList,word_list,other_list, minConf=0.1):
     for conseq in H:
+        flag = True
         conf = supportData[freqSet] / supportData[freqSet - conseq]  # 计算置信度
         # 提升度lift计算lift = p(a & b) / p(a)*p(b)
         lift = supportData[freqSet] / (supportData[conseq] * supportData[freqSet - conseq])
@@ -120,11 +122,22 @@ def calcConf(freqSet, H, supportData, ruleList, minConf=0.7):
         if conf >= minConf and lift > 3:
             # print(freqSet - conseq, '-->', conseq, '支持度', round(supportData[freqSet - conseq], 2), '置信度：', conf,
             #       'lift值为：', round(lift, 2))
-            ruleList.append((freqSet - conseq, conseq, support, conf, lift))
-            ruleList.sort(key=lambda x: (x[2]), reverse=True)
+            t = freqSet
+            tt = freqSet - conseq
+            if len(word_list) > 0:
+                flag = False
+                if set(word_list) > set(t) and set(word_list) > set(tt):
+                    flag = False
+                elif set(word_list) > set(t) and set(other_list) > set(tt):
+                    flag = True
+                elif set(word_list) > set(tt) and set(other_list) > set(t):
+                    flag = True
+            if flag:
+                ruleList.append((freqSet - conseq, conseq, support, conf, lift))
+    ruleList.sort(key=lambda x: (x[2]), reverse=True)
 
 # 生成规则
-def gen_rule(L, supportData, minConf=0.7):
+def gen_rule(L, supportData, minConf=0.1,word_list = [], other_list = []):
     bigRuleList = []
     for i in range(1, len(L)):  # 从二项集开始计算
         for freqSet in L[i]:  # freqSet为所有的k项集
@@ -132,6 +145,6 @@ def gen_rule(L, supportData, minConf=0.7):
             H1 = list(freqSet)
             all_subset = []
             getSubset(H1, all_subset)  # 生成所有的子集
-            calcConf(freqSet, all_subset, supportData, bigRuleList, minConf)
+            calcConf(freqSet, all_subset, supportData, bigRuleList, word_list, other_list, minConf)
     return bigRuleList
 

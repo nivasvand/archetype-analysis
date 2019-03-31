@@ -2,7 +2,7 @@ import sys
 import json
 import os
 from constant import ARCHETYPE_FILES_INFO, PARENT_POM_DIR, POM_DIR, TAG_NAME_DICT_DIR, STATIC_DIR, STRUCTURE_INFO_DIR, \
-    VERSION_CHANGE_DIR
+    VERSION_CHANGE_DIR, DEPENDENCY_DIR, PLUGIN_DIR, DEPENDENCY_PLUGIN_DIR, TAG_DIR,TOKEN_DIR
 import bs4
 from bs4 import BeautifulSoup
 import numpy as np
@@ -13,7 +13,17 @@ from scipy.stats import mannwhitneyu
 import re
 import sys
 import codecs
-
+import gensim
+import nltk
+from nltk.tokenize import word_tokenize
+import string
+from gensim import corpora, models, similarities
+from nltk.corpus import stopwords
+from nltk import word_tokenize, pos_tag
+from nltk.corpus import wordnet
+from gensim.models.ldamodel import LdaModel
+from nltk.stem import WordNetLemmatizer
+import javalang
 try:
     import xml.etree.cElementTree as ET
 except ImportError:
@@ -26,11 +36,21 @@ inner_pom_tag_name_dict_name = "inner_pom_tag_name_dict.txt"
 pom_structure_info_file_name = "pom_structure_info.txt"
 pre_pom_structure_info_file_name = "pre_pom_structure_info.txt"
 version_change_file_name = "version_change.txt"
+dependency_apriori_file_name  = "dependency_apriori.txt"
+plugin_apriori_file_name  = "plugin_apriori.txt"
+dependency_plugin_apriori_file_name = "dependency_plugin_apriori.txt"
+tag_apriori_file_name  = "tag_apriori.txt"
+token_file_name ="token_file_name.txt"
 OUTER_POM_TAG_NAME_DICT_NAME = os.path.join(TAG_NAME_DICT_DIR, outer_pom_tag_name_dict_name)
 INNER_POM_TAG_NAME_DICT_NAME = os.path.join(TAG_NAME_DICT_DIR, inner_pom_tag_name_dict_name)
 POM_STRUCTURE_INFO_FILE_NAME = os.path.join(STRUCTURE_INFO_DIR, pom_structure_info_file_name)
 PRE_POM_STRUCTURE_INFO_FILE_NAME = os.path.join(STRUCTURE_INFO_DIR, pre_pom_structure_info_file_name)
 VERSION_CHANGE_FILE_NAME = os.path.join(VERSION_CHANGE_DIR, version_change_file_name)
+DENPENDENCY_APRIORI_DIR_NAME = os.path.join(DEPENDENCY_DIR, dependency_apriori_file_name)
+PLUGIN_APRIORI_DIR_NAME = os.path.join(PLUGIN_DIR, plugin_apriori_file_name)
+DENPENDENCY_PLUGIN_APRIORI_DIR_NAME = os.path.join(DEPENDENCY_PLUGIN_DIR, dependency_plugin_apriori_file_name)
+TAG_APRIORI_DIR_NAME = os.path.join(TAG_DIR, tag_apriori_file_name)
+TOKEN_FILE_DIR =  os.path.join(TOKEN_DIR, token_file_name)
 
 
 def get_outer_pom_path(value_item):
@@ -42,6 +62,16 @@ def get_outer_pom_path(value_item):
 def get_inner_pom_path(value_item):
     jar_pom_path = value_item["jar"]["path"]
     jar_pom_path = jar_pom_path.replace("static/output/", "", ) + "/pom.xml"
+    return jar_pom_path
+
+def get_inner_jar_path(value_item):
+    jar_pom_path_list = []
+    jar_pom_path = value_item["jar"]["path"]
+    jar_pom_path = jar_pom_path.replace("static/output/", "", )
+    # sub_model_list = value_item["jar"]["sub_models"]
+    # if len(sub_model_list)>0:
+    #     for sub_model in sub_model_list:
+    #         current_jar_pom_path = os.path.join()
     return jar_pom_path
 
 
@@ -92,6 +122,23 @@ def get_pom_path(value, is_inner, index=1):
     return None
 
 
+def get_two_pom_path(value, index=1):
+    length = len(value)
+    inner_pom_path = ""
+    outer_pom_path = ""
+    if length > 1:
+        if value[index]["jar"]["exist"]:
+            inner_pom_path = get_inner_jar_path(value[index])
+            outer_pom_path = get_outer_pom_path(value[index])
+            return [inner_pom_path, outer_pom_path]
+    else:
+        if value[0]["jar"]["exist"]:
+            inner_pom_path = get_inner_jar_path(value[0])
+            outer_pom_path = get_outer_pom_path(value[0])
+            return [inner_pom_path, outer_pom_path]
+    return None
+
+
 def filter_pom_version(archetype_files_info_dict, is_inner):
     all_pom_version_list = []
     for key, value in archetype_files_info_dict.items():
@@ -124,6 +171,21 @@ def get_all_pom_path(archetype_files_info_dict, is_inner):
         current = get_pom_path(value, is_inner)
         if current:
             pom_file_name_list.append(current)
+            num += 1
+        else:
+            continue
+    print(num)
+    return pom_file_name_list
+
+
+def get_all_two_pom_path(archetype_files_info_dict):
+    num = 0
+    pom_file_name_list = []
+    for key, value in archetype_files_info_dict.items():
+        # print(get_pom_path(value, is_inner))
+        current_two_pom = get_two_pom_path(value)
+        if current_two_pom:
+            pom_file_name_list.append(current_two_pom)
             num += 1
         else:
             continue
@@ -328,7 +390,7 @@ def write_structure_info_list_to_file(structure_info_list, write_file_dir):
 
 
 def get_tag_in_one_pom(pom_file_name):
-    drop_list = ["artifactId", "version", "groupId", "packaging", "modelVersion", "name", "project"]
+    drop_list = ["artifactId", "version", "groupId", "packaging", "modelVersion", "name", "project", "url",	"organization", "description", "scm", "parent"]
     current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
     tag_in_one_pom = []
     if os.path.isfile(current_file_dir):
@@ -347,6 +409,17 @@ def get_tag_in_one_pom(pom_file_name):
     return tag_in_one_pom
 
 
+def get_description_in_one_pom(pom_file_name):
+    current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
+    description = ""
+    if os.path.isfile(current_file_dir):
+        soup = BeautifulSoup(open(current_file_dir, 'rt', encoding='latin1'), "xml")
+        description = soup.find("description")
+        if description:
+            description = description.text
+    return description
+
+
 def get_tag_in_all_pom(pom_file_name_list):
     tag_in_all_pom = []
     for pom_file_name in pom_file_name_list:
@@ -356,10 +429,35 @@ def get_tag_in_all_pom(pom_file_name_list):
     return tag_in_all_pom
 
 
-# def my_apriori(data_set, support=0.5, confidence=0.5, lift=0, minlen=3, maxlen=6):
-#     rules = apriori(data_set, support, confidence, lift, minlen, maxlen)
-#     rules_sorted = sorted(rules, key=lambda x: (x[4], x[3], x[2]), reverse=True)
-#     return rules_sorted
+def get_description_in_all_pom(pom_file_name_list):
+    description_in_all_pom = []
+    for pom_file_name in pom_file_name_list:
+        current_description_in_one_pom = get_description_in_one_pom(pom_file_name)
+        if current_description_in_one_pom:
+            description_in_all_pom.append(current_description_in_one_pom)
+    return description_in_all_pom
+
+
+def get_text_in_all_pom(pom_file_name_list):
+    print("get text start")
+    i = 0
+    text_in_all_pom = []
+    for pom_file_name in pom_file_name_list:
+        current_description_in_one_pom = get_description_in_one_pom(pom_file_name[1])
+        current_java_class_name_list = get_java_class_in_one_archetype(pom_file_name[0])
+        current_java_file_list = get_java_file_in_one_archrtype(pom_file_name[0])
+        current_java_method_list = get_java_method(current_java_file_list)
+        if len(current_java_method_list) == 0:
+            i += 1
+            # print(pom_file_name)
+        if current_description_in_one_pom:
+            text_in_all_pom.append([current_description_in_one_pom, current_java_class_name_list, current_java_method_list])
+        else:
+            text_in_all_pom.append(["",current_java_class_name_list,current_java_method_list])
+    print(i)
+    print("get text finish")
+    return text_in_all_pom
+
 
 def get_association_rule(dataset, minSupport=0.01, minConf=0.5):
     L, supportData = self_apriori(dataset, minSupport)
@@ -381,20 +479,25 @@ def has_tag(pom_file_name, tag_name):
     return None
 
 
-def get_dependency_in_one_pom(pom_file_name):
+def get_item_in_one_pom(pom_file_name, item_name, items_name):
     current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
-    dependency_in_one_pom = []
+    item_in_one_pom = []
     if os.path.isfile(current_file_dir):
         soup = BeautifulSoup(open(current_file_dir, 'rt', encoding='latin1'), "xml")
-        dependencies = soup.find_all(['dependencies'])
-        dependency_list = []
-        if len(dependencies) > 0:
-            dependency_list = dependencies[0].find_all("dependency")
-        for item in dependency_list:
-            item_name = item.find("groupId").text + "_" + item.find("artifactId").text
-            if item_name not in dependency_in_one_pom:
-                dependency_in_one_pom.append(item_name)
-    return dependency_in_one_pom
+        items = soup.find_all(items_name)
+        item_raw_list = []
+        if len(items) > 0:
+            item_raw_list = items[0].find_all(item_name)
+        for item in item_raw_list:
+            item_groupId = item.find("groupId")
+            # item_artifactId = item.find("artifactId")
+            # if item_groupId and item_artifactId:
+            #     item_name = item_groupId.text + "_" + item_artifactId.text
+            if item_groupId:
+                item_name = item_groupId.text
+                if item_name not in item_in_one_pom:
+                    item_in_one_pom.append(item_name)
+    return item_in_one_pom
 
 
 def cal_item(pom_file_name_list, item_name, items_name):
@@ -413,13 +516,13 @@ def cal_item(pom_file_name_list, item_name, items_name):
     # return np.mean(dependency_num_in_all_pom), np.median(dependency_num_in_all_pom)
 
 
-def get_dependency_in_all_pom(pom_file_name_list):
-    dependency_in_all_pom = []
+def get_item_in_all_pom(pom_file_name_list,item_name, items_name):
+    item_in_all_pom = []
     for pom_file_name in pom_file_name_list:
-        current_dependency_in_one_pom = get_dependency_in_one_pom(pom_file_name)
-        if len(current_dependency_in_one_pom) > 0:
-            dependency_in_all_pom.append(current_dependency_in_one_pom)
-    return dependency_in_all_pom
+        current_item_in_one_pom = get_item_in_one_pom(pom_file_name,item_name, items_name)
+        if len(current_item_in_one_pom) > 0:
+            item_in_all_pom.append(current_item_in_one_pom)
+    return item_in_all_pom
 
 
 # def get_pom_tag()
@@ -526,7 +629,6 @@ def get_plugin_list(pom_file_dir):
                     plugin_name = plugin_groupId.text + "_" + plugin_artifactId.text
                 else:
                     continue
-
                 plugin_version = item.find("version")
                 plugin_dependencies = item.find("dependencies")
                 pluin_dependency_list = []
@@ -684,6 +786,318 @@ def write_dic_to_file(dic, write_file_dir):
     file_object.close()
 
 
+def write_list_in_list_to_file(file_list, write_file_dir):
+    file_object = open(write_file_dir, 'w', encoding='utf-8')
+    for list_value in file_list:
+        for value in list_value:
+            # if type(value) == frozenset:
+            #     value = [str(x) for x in value]
+            file_object.write(value)
+            file_object.write("    ")
+        file_object.write("\n")
+    file_object.close()
+
+
+def tokenize(description_list, java_class_list,java_method_list):
+    i = 0
+    word_list = []
+    del_list = ["archetype", "project", "maven", "java","something","module","create","template","compare","point", "entry", "execute","set","get","main", "use","controller","hello"]
+    for text in description_list:
+        i += 1
+        # print(i)
+        text = "".join([ch for ch in text if ch not in string.punctuation])
+        text = word_tokenize(text)
+        # text = [word.lower() for word in text]
+        # tagged_sent = pos_tag(text)
+        # wnl = WordNetLemmatizer()
+        # text_token = []
+        # for tag in tagged_sent:
+        #     pos = get_wordnet_pos(tag[1])
+        #     wordnet_pos = pos or wordnet.NOUN
+        #     if filter_word_pos(wordnet_pos):
+        #         word = wnl.lemmatize(tag[0], pos=wordnet_pos)
+        #         text_token.append(word)# 词形还原
+        #     else:
+        #         continue
+        # text_token_remove_word = [item for item in text_token if item not in del_list]
+        text_word = list(set(text+java_class_list+java_method_list))
+        text_word = get_filter_word_list(text_word,del_list)
+        text_word = list(set(text_word))
+        word_list.append(text_word)
+    print("tokenize finish")
+    write_list_in_list_to_file(word_list,TOKEN_FILE_DIR)
+    return word_list
+
+
+def get_dic(word_list):
+    return corpora.Dictionary(word_list)
+
+
+def add_dic(dic, add_word_list):
+    dic.add_documents(add_word_list, prune_at=2000000)
+    return dic
+
+
+def get_clean_word_list(word_list):
+    clean_word_list = []
+    for words in word_list:
+        clean_word_list.append([w.lower() for w in words if w.lower() not in stopwords.words('english') and w.isdigit() == False])
+    return clean_word_list
+
+
+def get_corpus(dic, text_list):
+    corpus = [dic.doc2bow(text) for text in text_list]
+    return corpus
+
+
+def filter_word_pos(pos):
+    if pos == wordnet.ADJ:
+        return False
+    else:
+        return True
+
+
+def get_wordnet_pos(tag):
+    if tag.startswith('J'):
+        return wordnet.ADJ
+    elif tag.startswith('V'):
+        return wordnet.VERB
+    elif tag.startswith('N'):
+        return wordnet.NOUN
+    elif tag.startswith('R'):
+        return wordnet.ADV
+    else:
+        return None
+
+
+def get_filter_word_list(word_list,del_word_list):
+    word_list = [word.lower() for word in word_list]
+    wnl = WordNetLemmatizer()
+    tagged_sent = pos_tag(word_list)
+    word_token = []
+    for tag in tagged_sent:
+        pos = get_wordnet_pos(tag[1])
+        wordnet_pos = pos or wordnet.NOUN
+        if filter_word_pos(wordnet_pos):
+            word = wnl.lemmatize(tag[0], pos=wordnet_pos)
+            word_token.append(word)  # 词形还原
+        else:
+            continue
+    word_token_remove_word = [item for item in word_token if item not in del_word_list]
+    return word_token_remove_word
+
+def get_word_list_from_pom(pom_file_name_list):
+    text_list = get_text_in_all_pom(pom_file_name_list)
+    description_list = []
+    java_class_list = []
+    java_method_list = []
+    for text in text_list:
+        description_list.append(text[0])
+        java_class_list = text[1]
+        java_method_list = text[2]
+    tokenize_list = tokenize(description_list, java_class_list, java_method_list)
+    clean_word_list = get_clean_word_list(tokenize_list)
+    return clean_word_list
+
+
+def build_topicmodel(pom_file_name_list, topic_num):
+    # text_list = get_text_in_all_pom(pom_file_name_list)
+    # description_list = []
+    # java_class_list = []
+    # java_method_list = []
+    # for text in text_list:
+    #     description_list.append(text[0])
+    #     java_class_list = text[1]
+    #     java_method_list = text[2]
+    # tokenize_list = tokenize(description_list,java_class_list,java_method_list)
+    # clean_word_list = get_clean_word_list(tokenize_list)
+    # for word_list in clean_word_list:
+    #     print(word_list)
+    clean_word_list = get_word_list_from_pom(pom_file_name_list)
+    dic = get_dic(clean_word_list)
+    print("dic finish")
+    basic_corpus = get_corpus(dic, clean_word_list)
+    lda = LdaModel(corpus=basic_corpus, id2word=dic, num_topics=topic_num)
+    # for i in range(10):
+    #     print(i)
+    #     print(lda.show_topic(i))
+    #     print("-------------------")
+    show_text_topic(lda, dic, clean_word_list[0:50])
+    return lda
+
+
+def show_text_topic(lda_model, dic, text_list):
+    i = 0
+    for text in text_list:
+        i +=1
+        print(i)
+        doc_bow = dic.doc2bow(text)  # 文档转换成bow
+        doc_lda = lda_model[doc_bow]
+        # print(doc_lda)
+        # for topic in doc_lda:
+        #     print("%s\t%f\n" % (lda_model.print_topic(topic[0]), topic[1]))
+        print(get_top_topic(lda_model,doc_lda))
+
+
+def get_java_class_in_one_archetype(path,rule=".java"):
+    current_path = os.path.join(STATIC_DIR, path)
+    java_class_name_in_one_archetype = []
+    for root,dirs,files in os.walk(current_path):   # os.walk获取所有的目录
+        for file in files:
+            file_name = os.path.join(root,file)
+            if file_name.endswith(rule):  # 判断是否是".java"结尾
+                java_file_name = os.path.basename(file_name).split(".java")[0]
+                java_class_name_list = split_java_name(java_file_name)
+                java_class_name_in_one_archetype+= java_class_name_list
+    java_class_name_in_one_archetype = list(set(java_class_name_in_one_archetype))
+    # print(list(set(java_class_name_in_one_archetype)))
+    return java_class_name_in_one_archetype
+
+
+def get_java_file_in_one_archrtype(path):
+    current_path = os.path.join(STATIC_DIR, path)
+    java_file_name_in_one_archetype = []
+    for root,dirs,files in os.walk(current_path):   # os.walk获取所有的目录
+        for file in files:
+            file_name = os.path.join(root,file)
+            if file_name.endswith(".java"):  # 判断是否是".java"结尾
+                java_file_name_in_one_archetype.append(file_name)
+    return java_file_name_in_one_archetype
+
+
+def split_java_name(java_name):
+    pattern = "[A-Z][a-z]"
+    new_string = re.sub(pattern, lambda x: "_" + x.group(0), java_name)
+    java_name_list = new_string.split("_")
+    if java_name_list[0]:
+        return java_name_list
+    else:
+        return java_name_list[1:]
+
+
+def get_java_method(java_file_path_list):
+    method_list = []
+    split_method_list = []
+    for java_path in java_file_path_list:
+        with open(java_path, 'rt', encoding='latin1') as fin:
+            content = fin.read()
+        # content = re.sub('[\w\W]*package .*?;', '', content)
+        # content = re.sub('".*?"', '""', content)
+        # try:
+        #     tree = javalang.parse.parse(content)
+        #     for _, node in tree.filter(javalang.tree.MethodDeclaration):
+        #         method_list.append(node.name)
+        # except:
+        #     return None
+        current_method_list = get_methods(content)
+        method_list += current_method_list
+    for method_name in method_list:
+        split_method_list += split_java_name(method_name)
+    split_method_list = list(set(split_method_list))
+    return split_method_list
+
+
+def get_methods(code: str):
+    try:
+        code = re.sub('^\\${.+?}$', '', code, flags=re.MULTILINE)
+        code = re.sub('\\${.+?}', 'test', code)
+        code = re.sub('^#+.*$', '', code, flags=re.MULTILINE)
+        code = re.sub('^#set.*$', '', code, flags=re.MULTILINE)
+        code = re.sub(r'^(package)(.*-.*)(;)$', r'\1 test\3', code, flags=re.MULTILINE)
+        code = re.sub(r'(".*)#if.*#end', r'\1test', code)
+        code = re.sub(r'#if.*#end', '"test"', code)
+
+        tree = javalang.parse.parse(code)
+        return [node.name for _, node in tree.filter(javalang.tree.MethodDeclaration)]
+    except:
+        return []
+
+
+def get_top_topic(lda_model,doc_lda):
+    top = 0
+    top_topic_number = 0
+    for topic_item in doc_lda:
+        score = topic_item[1]
+        number = topic_item[0]
+        if score > top:
+            top = score
+            top_topic_number = number
+    top_topic_list = lda_model.show_topic(top_topic_number)
+    top_topic_word_list = []
+    for item in top_topic_list:
+        top_topic_word_list.append(item[0])
+    return top_topic_word_list, top
+
+
+def tf_idf_model(pom_file_name_list):
+    clean_word_list = get_word_list_from_pom(pom_file_name_list)
+    dic = get_dic(clean_word_list)
+    print("dic finish")
+    basic_corpus = get_corpus(dic, clean_word_list)
+    tfidf = models.TfidfModel(basic_corpus)
+    # get_tf_idf_words_in_all_text(dic,tfidf,clean_word_list[1:20])
+    return tfidf,dic,clean_word_list,basic_corpus
+
+
+def get_tf_idf_words_in_one_text(dic, tfidf_model, text):
+    top_words_dic = {}
+    top_words_list = []
+    doc_bow = dic.doc2bow(text)  # 文档转换成bow
+    corpus_tfidf_current = tfidf_model[doc_bow]
+    corpus_tfidf_current = sorted(corpus_tfidf_current, key=lambda item: item[1], reverse=True)
+    id2token = dict(zip(dic.token2id.values(), dic.token2id.keys()))
+    dict_len = len(text)
+    index =5
+    if dict_len<index:
+        index = dict_len
+    for i in range(index):
+        top_words_dic[id2token[corpus_tfidf_current[i][0]]] = corpus_tfidf_current[i][1]
+        top_words_list.append(id2token[corpus_tfidf_current[i][0]])
+    return top_words_list
+
+
+def get_tf_idf_words_in_all_text(dic, tfidf_model, text_list):
+    i = 0
+    top_words_list_all = []
+    for text in text_list:
+        i += 1
+        print(i)
+        current_word_dic,current_word_list = get_tf_idf_words_in_one_text(dic, tfidf_model, text)
+        top_words_list_all.append(current_word_list)
+    return top_words_list_all
+
+
+def get_depen_plu_tfidf_in_one_pom(inner_pom_file_dir,dic,tfidf_model, text):
+    inner_pom_file_dir = inner_pom_file_dir + "/pom.xml"
+    current_file_dir = os.path.join(STATIC_DIR, inner_pom_file_dir)
+    tfidf_words = get_tf_idf_words_in_one_text(dic, tfidf_model, text)
+    dependency_list = get_item_in_one_pom(inner_pom_file_dir,"dependency", "dependencies")
+    dependency_list.remove("junit")
+    plugin_list = get_item_in_one_pom(inner_pom_file_dir,"plugin", "plugins")
+    dependency_tfidf_words = list(tfidf_words) + dependency_list
+    plugin_tfidf_words = list(tfidf_words) +  plugin_list
+    return dependency_tfidf_words, plugin_tfidf_words,tfidf_words,dependency_list,plugin_list
+
+
+def get_depen_plu_tfidf_in_all_pom(pom_file_name_list):
+    tfidf, dic, clean_word_list, basic_corpus = tf_idf_model(pom_file_name_list)
+    dependency_tfidf_words_list = []
+    plugin_tfidf_words_list = []
+    dependency_list_all = []
+    plugin_list_all = []
+    tfidf_words_all = []
+    for i in range(len(pom_file_name_list)):
+        dependency_tfidf_words, plugin_tfidf_words,tfidf_words,dependency_list,plugin_list = get_depen_plu_tfidf_in_one_pom(pom_file_name_list[i][0],dic,tfidf,clean_word_list[i])
+        dependency_tfidf_words_list.append(dependency_tfidf_words)
+        plugin_tfidf_words_list.append(plugin_tfidf_words)
+        dependency_list_all += dependency_list
+        plugin_list_all += plugin_list
+        tfidf_words_all += tfidf_words
+    return dependency_tfidf_words_list,plugin_tfidf_words_list,dependency_list_all,plugin_list_all,tfidf_words_all
+
+
+
+
 if __name__ == "__main__":
     # num = 0
     # inherit = 0
@@ -693,19 +1107,31 @@ if __name__ == "__main__":
     # write_structure_info_list_to_file(structure_info_list, POM_STRUCTURE_INFO_FILE_NAME)
     # write_structure_info_list_to_file(pre_structure_info_list, PRE_POM_STRUCTURE_INFO_FILE_NAME)
 
-    pom_file_name_list = get_all_pom_path(archetype_files_info_dict, True)
+    # pom_file_name_list = get_all_pom_path(archetype_files_info_dict, False)
+    pom_file_name_list = get_all_two_pom_path(archetype_files_info_dict)
     # print(cal_item(pom_file_name_list, "dependency", "dependencies"))
-    # tag_in_all_pom = get_tag_in_all_pom(pom_file_name_list)
-    dependency_in_all_pom = get_dependency_in_all_pom(pom_file_name_list)
-    L, supportData = self_apriori(dependency_in_all_pom, minSupport=0.01)
-    bigRuleList = gen_rule(L, supportData)
-    # get_association_rule(dependency_in_all_pom)
+    # description_in_all_pom = get_description_in_all_pom(pom_file_name_list)
+    #
+    # lda = build_topicmodel(pom_file_name_list, 50)
+    # tf_idf_model(pom_file_name_list)
+    dependency_tfidf_words_list, plugin_tfidf_words_list, dependency_list_all, plugin_list_all, tfidf_words_all = get_depen_plu_tfidf_in_all_pom(pom_file_name_list)
+    # plugin_in_all_pom = get_item_in_all_pom(pom_file_name_list, "plugin", "plugins")
+    # dependency_in_all_pom = get_item_in_all_pom(pom_file_name_list, "dependency", "dependencies")
+    # plugin_dependency_in_all_pom = plugin_in_all_pom + dependency_in_all_pom
+
+
+    L, supportData = self_apriori(dependency_tfidf_words_list, 0.01)
+    # for item in supportData:
+    #     print(item)
+    bigRuleList = gen_rule(L, supportData, 0.3, tfidf_words_all,dependency_list_all)
+    # # get_association_rule(dependency_in_all_pom)
     #
     # # rules_sorted = my_apriori(tag_in_all_pom,)
 
     for r in bigRuleList:
         print(r, "\n")
 
+    # write_list_in_list_to_file(bigRuleList, TAG_APRIORI_DIR_NAME)
     # for pom_file_name in pom_file_name_list:
     #     current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
     #     inherit_list = is_inherit(current_file_dir)
@@ -725,3 +1151,6 @@ if __name__ == "__main__":
     # diff_tag_dic = compare_all_pom(archetype_files_info_dict, True)
     # # print(diff_tag_dic)
     # write_dic_to_file(diff_tag_dic, VERSION_CHANGE_FILE_NAME)
+
+    # list = [["batsà", "a"], ["b"]]
+    # write_list_in_list_to_file(list, TOKEN_FILE_DIR)
