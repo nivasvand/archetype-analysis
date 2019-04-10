@@ -23,7 +23,9 @@ from nltk import word_tokenize, pos_tag
 from nltk.corpus import wordnet
 from gensim.models.ldamodel import LdaModel
 from nltk.stem import WordNetLemmatizer
+from collections import Counter
 import javalang
+import copy
 try:
     import xml.etree.cElementTree as ET
 except ImportError:
@@ -41,6 +43,7 @@ plugin_apriori_file_name  = "plugin_apriori.txt"
 dependency_plugin_apriori_file_name = "dependency_plugin_apriori.txt"
 tag_apriori_file_name  = "tag_apriori.txt"
 token_file_name ="token_file_name.txt"
+dependency_add_del_file_name = "dependency_add_del.txt"
 OUTER_POM_TAG_NAME_DICT_NAME = os.path.join(TAG_NAME_DICT_DIR, outer_pom_tag_name_dict_name)
 INNER_POM_TAG_NAME_DICT_NAME = os.path.join(TAG_NAME_DICT_DIR, inner_pom_tag_name_dict_name)
 POM_STRUCTURE_INFO_FILE_NAME = os.path.join(STRUCTURE_INFO_DIR, pom_structure_info_file_name)
@@ -51,6 +54,7 @@ PLUGIN_APRIORI_DIR_NAME = os.path.join(PLUGIN_DIR, plugin_apriori_file_name)
 DENPENDENCY_PLUGIN_APRIORI_DIR_NAME = os.path.join(DEPENDENCY_PLUGIN_DIR, dependency_plugin_apriori_file_name)
 TAG_APRIORI_DIR_NAME = os.path.join(TAG_DIR, tag_apriori_file_name)
 TOKEN_FILE_DIR =  os.path.join(TOKEN_DIR, token_file_name)
+DEPENDENCY_ADD_DEL_DIR = os.path.join(VERSION_CHANGE_DIR, dependency_add_del_file_name)
 
 
 def get_outer_pom_path(value_item):
@@ -412,11 +416,18 @@ def get_tag_in_one_pom(pom_file_name):
 def get_description_in_one_pom(pom_file_name):
     current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
     description = ""
+    name = " "
     if os.path.isfile(current_file_dir):
         soup = BeautifulSoup(open(current_file_dir, 'rt', encoding='latin1'), "xml")
         description = soup.find("description")
+        project = soup.project
         if description:
             description = description.text
+        if project:
+            name = project.find_all("name", recursive=False)
+            if len(name)>0:
+                name =name[0].text
+                description = str(description) +" "+str(name)
     return description
 
 
@@ -479,24 +490,31 @@ def has_tag(pom_file_name, tag_name):
     return None
 
 
-def get_item_in_one_pom(pom_file_name, item_name, items_name):
+def get_item_in_one_pom(pom_file_name, item_name, items_name,items_name_plus):
     current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
     item_in_one_pom = []
     if os.path.isfile(current_file_dir):
         soup = BeautifulSoup(open(current_file_dir, 'rt', encoding='latin1'), "xml")
         items = soup.find_all(items_name)
+        items_plus = soup.items_name_plus
         item_raw_list = []
         if len(items) > 0:
             item_raw_list = items[0].find_all(item_name)
+        if items_plus:
+            item_raw_list = item_raw_list + items_plus.find_all(item_name)
         for item in item_raw_list:
             item_groupId = item.find("groupId")
             # item_artifactId = item.find("artifactId")
             # if item_groupId and item_artifactId:
             #     item_name = item_groupId.text + "_" + item_artifactId.text
+            #     item_in_one_pom.append(item_name)
             if item_groupId:
                 item_name = item_groupId.text
+                # if item_name =="junit":
+                #     continue
                 if item_name not in item_in_one_pom:
                     item_in_one_pom.append(item_name)
+
     return item_in_one_pom
 
 
@@ -516,10 +534,10 @@ def cal_item(pom_file_name_list, item_name, items_name):
     # return np.mean(dependency_num_in_all_pom), np.median(dependency_num_in_all_pom)
 
 
-def get_item_in_all_pom(pom_file_name_list,item_name, items_name):
+def get_item_in_all_pom(pom_file_name_list,item_name, items_name,items_name_plus):
     item_in_all_pom = []
     for pom_file_name in pom_file_name_list:
-        current_item_in_one_pom = get_item_in_one_pom(pom_file_name,item_name, items_name)
+        current_item_in_one_pom = get_item_in_one_pom(pom_file_name,item_name, items_name,items_name_plus)
         if len(current_item_in_one_pom) > 0:
             item_in_all_pom.append(current_item_in_one_pom)
     return item_in_all_pom
@@ -556,6 +574,37 @@ def flat_pom(soup):
     return flat_pom_list
 
 
+def flat_pom_tag(pom_path):
+    pom_file_dir = os.path.join(STATIC_DIR, pom_path)
+    flat_pom_dict = {}
+    if os.path.isfile(pom_file_dir):
+        soup = BeautifulSoup(open(pom_file_dir, 'rt', encoding='latin1'), "xml")
+        pom = soup.project
+        if pom:
+            for child in pom.descendants:
+                tag_name = ""
+                if type(child) == bs4.element.NavigableString and child.encode("utf-8") != b"\n":
+                    for current_parent in child.parents:
+                        if current_parent and current_parent.parent:
+                            tag_name = tag_name + "_" + current_parent.name
+                    if  tag_name in flat_pom_dict.keys():
+                        flat_pom_dict[tag_name] +=1
+                    else:
+                        flat_pom_dict[tag_name] = 1
+        return flat_pom_dict
+
+
+def get_all_flat_pom_tag(pom_file_name_list):
+    flat_pom_dic_all = {}
+    for pom_path in pom_file_name_list:
+        new_flat_pom_dict = flat_pom_tag(pom_path)
+        flat_pom_dic_all = dict(Counter(new_flat_pom_dict)+Counter(flat_pom_dic_all))
+    flat_pom_dic_all = sorted(flat_pom_dic_all.items(), reverse=True, key=lambda k: k[1])
+    for tag_name in flat_pom_dic_all:
+        print(tag_name)
+    return flat_pom_dic_all
+
+
 def get_item_list(pom_file_dir, item_name, items_name):
     current_file_dir = os.path.join(STATIC_DIR, pom_file_dir)
     list = []
@@ -575,10 +624,13 @@ def get_item_list(pom_file_dir, item_name, items_name):
 
 def get_dependency_list(pom_file_dir):
     dependency_list = []
+    dependency_raw_list = []
     soup = BeautifulSoup(open(pom_file_dir, 'rt', encoding='latin1'), "xml")
-    dependencies = soup.dependencies
+    dependencies = soup.find_all("dependencies")
     if dependencies:
-        dependency_raw_list = dependencies.find_all("dependency")
+        for dependencies_item in dependencies:
+            dependency_raw_list = dependencies_item.find_all("dependency")+ dependency_raw_list
+
         for item in dependency_raw_list:
             dependency_groupId = item.find("groupId")
             dependency_artifactId = item.find("artifactId")
@@ -610,18 +662,22 @@ def get_dependency_list(pom_file_dir):
                     else:
                         continue
             dependency_list.append([dependency_name, dependency_version, dependency_scope, dependency_exclution_list])
-    # print(dependency_list)
-    return dependency_list
+        return dependency_list
+    else:
+        return None
 
 
 def get_plugin_list(pom_file_dir):
     plugin_list = []
+    plugin_raw_list = []
     soup = BeautifulSoup(open(pom_file_dir, 'rt', encoding='latin1'), "xml")
     build = soup.build
     if build:
-        plugins = build.plugins
+        plugins = build.find_all("plugins")
         if plugins:
-            plugin_raw_list = plugins.find_all("plugin")
+            for plugin_item in  plugins:
+                plugin_raw_list = plugin_item.find_all("plugin") + plugin_raw_list
+
             for item in plugin_raw_list:
                 plugin_groupId = item.find("groupId")
                 plugin_artifactId = item.find("artifactId")
@@ -648,7 +704,9 @@ def get_plugin_list(pom_file_dir):
                         else:
                             continue
                 plugin_list.append([plugin_name, plugin_version, pluin_dependency_list])
-    return plugin_list
+        return plugin_list
+    else:
+        return None
 
 
 def compare_dependency_list(dependency_list1, dependency_list2, diff_tag_dic):
@@ -676,8 +734,153 @@ def compare_dependency_list(dependency_list1, dependency_list2, diff_tag_dic):
             if dependency_add_flag:
                 diff_tag_dic["dependency_add"] += 1
             dependency_add_flag = True
-
     return diff_tag_dic
+
+
+def compare_item_add_del(item_list1, item_list2):
+    item_del_list = []
+    item_add_list = []
+    for item in item_list1:
+        item_del_list.append(item[0])
+    for item in item_list2:
+        item_add_list.append(item[0])
+    if len(item_list1) > 0 and len(item_list2) > 0:
+        for item1 in item_list1:
+            for item2 in item_list2:
+                if item1[0] == item2[0]:
+                    if item1[0] in item_del_list:
+                        item_del_list.remove(item1[0])
+
+        for item2 in item_list2:
+            for item1 in item_list1:
+                if item1[0] == item2[0]:
+                    if item2[0] in item_add_list:
+                        item_add_list.remove(item2[0])
+    return [item_del_list, len(item_del_list), item_add_list, len(item_add_list)]
+
+
+def compare_item_add_del_in_all_pom(archetype_files_info_dict, is_inner):
+    all_pom_version_list = filter_pom_version(archetype_files_info_dict, is_inner)
+    dependency_comapre_list = []
+    dependency_del_dict_all = []
+    dependency_add_dict_all = []
+    dependency_del_num_list = []
+    dependency_add_num_list = []
+    plugin_comapre_list = []
+    plugin_del_dict_all = []
+    plugin_add_dict_all = []
+    plugin_del_num_list = []
+    plugin_add_num_list = []
+    num = 0
+    add_num = 0
+    del_num = 0
+    add_del = 0
+    sum_equ = 0
+    for one_pom_version_list in all_pom_version_list:
+        length = len(one_pom_version_list)
+        if length == 1:
+            continue
+        else:
+            for i in range(length - 1):
+                pom1_path = one_pom_version_list[i]
+                pom1_file_dir = os.path.join(STATIC_DIR, pom1_path)
+                pom2_path = one_pom_version_list[i + 1]
+                pom2_file_dir = os.path.join(STATIC_DIR, pom2_path)
+                if pom1_file_dir == pom2_file_dir:
+                    continue
+                # print(pom1_file_dir, pom2_file_dir)
+                if os.path.isfile(pom1_file_dir) and os.path.isfile(pom2_file_dir):
+                    # dependency_list1 = get_dependency_list(pom1_file_dir)
+                    # dependency_list2 = get_dependency_list(pom2_file_dir)
+                    # if len(dependency_list1) != 0 and len(dependency_list2) !=0:
+                    #     num += 1
+                    #     if num % 100 == 0:
+                    #         print(num, "\n")
+                        # dependency_del_list, dependency_del_num, dependency_add_list, dependency_add_num, pre_dependency_del_list, pre_dependency_add_list = compare_item_add_del(dependency_list1, dependency_list2)
+                        # if dependency_del_num > 0 and dependency_add_num > 0 :
+                        #     if dependency_del_num == dependency_add_num:
+                        #         add_del +=1
+                            # add_num +=1
+                            # del_num +=1
+                        # elif dependency_del_num > 0:
+                        #     del_num += 1
+                        # elif dependency_add_num > 0:
+                        #     add_num += 1
+                            # dependency_comapre_list.append([dependency_del_list, dependency_del_num, dependency_add_list, dependency_add_num])
+                        # dependency_del_dict_all = dict(Counter(dependency_del_dict_all) + Counter(dependency_del_list))
+                        # dependency_add_dict_all = dict(Counter(dependency_add_dict_all) + Counter(dependency_add_list))
+                        # if dependency_del_num > 0:
+                        #     dependency_del_num_list.append(dependency_del_num)
+                        # if  dependency_add_num > 0:
+                        #     dependency_add_num_list.append(dependency_add_num)
+                        # if "junit_junit" in dependency_del_list:
+                        #     print(pom1_file_dir, "    ", pom2_file_dir)
+                        #     print(pre_dependency_del_list, "\n", pre_dependency_add_list)
+
+                    plugin_list1 = get_plugin_list(pom1_file_dir)
+                    plugin_list2 = get_plugin_list(pom2_file_dir)
+                    if len(plugin_list1)!=0 and len(plugin_list2)!=0:
+                        num += 1
+                        if num % 100 == 0:
+                            print(num, "\n")
+                        plugin_del_list, plugin_del_num, plugin_add_list, plugin_add_num = compare_item_add_del(plugin_list1, plugin_list2)
+                        # if plugin_del_num > 0 or plugin_add_num > 0:
+                        #     plugin_comapre_list.append([plugin_del_list, plugin_del_num, plugin_add_list, plugin_add_num])
+                        # if plugin_del_num > 0 and plugin_add_num > 0:
+                        #     add_del += 1
+                        #     add_num += 1
+                        #     del_num += 1
+                        #     if plugin_del_num == plugin_add_num:
+                        #         sum_equ += 1
+                        # elif plugin_del_num > 0:
+                        #     del_num += 1
+                        # elif plugin_add_num > 0:
+                        #     add_num += 1
+                        # plugin_del_dict_all = dict(Counter(plugin_del_dict_all) + Counter(plugin_del_list))
+                        # if plugin_del_num > 0:
+                        #     plugin_del_num_list.append(plugin_del_num)
+
+                        # plugin_add_dict_all = dict(Counter(plugin_add_dict_all) + Counter(plugin_add_list))
+                        if plugin_add_num > 0:
+                            plugin_add_num_list.append(plugin_add_num)
+
+
+    # dependency_del_dict_all= sorted(dependency_del_dict_all.items(), reverse=True, key=lambda k: k[1])
+    # dependency_add_dict_all = sorted(dependency_add_dict_all.items(), reverse=True, key=lambda k: k[1])
+    # plugin_del_dict_all = sorted(plugin_del_dict_all.items(), reverse=True, key=lambda k: k[1])
+    # plugin_add_dict_all = sorted(plugin_add_dict_all.items(), reverse=True, key=lambda k: k[1])
+    # print("dependency")
+    # for item in dependency_comapre_list:
+    #     print(item)
+    # write_double_list_to_file(dependency_comapre_list,DEPENDENCY_ADD_DEL_DIR)
+    # print("dependency del")
+    # for item in dependency_del_dict_all:
+    #     print(item)
+    # print(np.median(dependency_del_num_list))
+    # print(np.mean(dependency_del_num_list))
+    # print(num)
+    # print("dependency add")
+    # for item in dependency_add_dict_all:
+    #     print(item)
+    # print(np.median(dependency_add_num_list))
+    # print(np.mean(dependency_add_num_list))
+    # print("plugin")
+    # for item in plugin_comapre_list:
+    #     print(item)
+    # print("plugin del")
+    # for item in plugin_del_dict_all:
+    #     print(item)
+    # print(np.median(plugin_del_num_list))
+    # print(np.mean(plugin_del_num_list))
+    print("plugin add")
+    # for item in plugin_add_dict_all:
+    #     print(item)
+    print(np.median(plugin_add_num_list))
+    print(np.mean(plugin_add_num_list))
+    # print(add_del)
+    # print(del_num)
+    # print(add_num)
+    # print(sum_equ)
 
 
 def compare_plugin_list(plugin_list1, plugin_list2, diff_tag_dic):
@@ -749,9 +952,6 @@ def compare_all_pom(archetype_files_info_dict, is_inner):
     num = 0
     diff_tag_dic = set_diff_tag_dic()
     for one_pom_version_list in all_pom_version_list:
-        num += 1
-        if num % 100 == 0:
-            print(num, "\n")
         length = len(one_pom_version_list)
         if length == 1:
             continue
@@ -761,18 +961,26 @@ def compare_all_pom(archetype_files_info_dict, is_inner):
                 pom1_file_dir = os.path.join(STATIC_DIR, pom1_path)
                 pom2_path = one_pom_version_list[i + 1]
                 pom2_file_dir = os.path.join(STATIC_DIR, pom2_path)
+                if pom1_path == pom2_path:
+                    continue
                 # print(pom1_file_dir, pom2_file_dir)
                 if os.path.isfile(pom1_file_dir) and os.path.isfile(pom2_file_dir):
+                    num += 1
+                    if num % 100 == 0:
+                        print(num, "\n")
                     dependency_list1 = get_dependency_list(pom1_file_dir)
                     dependency_list2 = get_dependency_list(pom2_file_dir)
                     plugin_list1 = get_plugin_list(pom1_file_dir)
                     plugin_list2 = get_plugin_list(pom2_file_dir)
-                    diff_tag_dic = compare_dependency_list(dependency_list1, dependency_list2, diff_tag_dic)
-                    diff_tag_dic = compare_plugin_list(plugin_list1, plugin_list2, diff_tag_dic)
+                    if dependency_list1 and dependency_list2:
+                        diff_tag_dic = compare_dependency_list(dependency_list1, dependency_list2, diff_tag_dic)
+                    if plugin_list1 and plugin_list2:
+                        diff_tag_dic = compare_plugin_list(plugin_list1, plugin_list2, diff_tag_dic)
                     compare_pom(pom1_file_dir, pom2_file_dir, diff_tag_dic)
                     # print(diff_tag_dic, "\n")
     diff_tag_dic = sorted(diff_tag_dic.items(), reverse=True, key=lambda k: k[1])
     # print(diff_tag_dic)
+    print(num)
     return diff_tag_dic
 
 
@@ -798,10 +1006,19 @@ def write_list_in_list_to_file(file_list, write_file_dir):
     file_object.close()
 
 
+def write_double_list_to_file(double_list,write_file_dir):
+    file_object = open(write_file_dir, 'w', encoding='utf-8')
+    for item_list in double_list:
+        item_list_str = " ".join([str(item) for item in item_list])
+        file_object.write(item_list_str)
+        file_object.write("\n")
+    file_object.close()
+
+
 def tokenize(description_list, java_class_list,java_method_list):
     i = 0
     word_list = []
-    del_list = ["archetype", "project", "maven", "java","something","module","create","template","compare","point", "entry", "execute","set","get","main", "use","controller","hello"]
+    del_list = ["archetype", "project", "maven", "java","something","module","create","template","compare","point", "entry", "execute","set","get","main", "use","controller","hello","none"]
     for text in description_list:
         i += 1
         # print(i)
@@ -918,11 +1135,11 @@ def build_topicmodel(pom_file_name_list, topic_num):
     print("dic finish")
     basic_corpus = get_corpus(dic, clean_word_list)
     lda = LdaModel(corpus=basic_corpus, id2word=dic, num_topics=topic_num)
-    # for i in range(10):
-    #     print(i)
-    #     print(lda.show_topic(i))
-    #     print("-------------------")
-    show_text_topic(lda, dic, clean_word_list[0:50])
+    for i in range(topic_num):
+        print(i)
+        print(lda.show_topic(i))
+        print("-------------------")
+    # show_text_topic(lda, dic, clean_word_list[0:50])
     return lda
 
 
@@ -1035,11 +1252,11 @@ def tf_idf_model(pom_file_name_list):
     print("dic finish")
     basic_corpus = get_corpus(dic, clean_word_list)
     tfidf = models.TfidfModel(basic_corpus)
-    # get_tf_idf_words_in_all_text(dic,tfidf,clean_word_list[1:20])
+    get_tf_idf_words_in_all_text(dic,tfidf,clean_word_list)
     return tfidf,dic,clean_word_list,basic_corpus
 
 
-def get_tf_idf_words_in_one_text(dic, tfidf_model, text):
+def get_tf_idf_words_in_one_text(dic,  tfidf_model, text):
     top_words_dic = {}
     top_words_list = []
     doc_bow = dic.doc2bow(text)  # 文档转换成bow
@@ -1051,20 +1268,29 @@ def get_tf_idf_words_in_one_text(dic, tfidf_model, text):
     if dict_len<index:
         index = dict_len
     for i in range(index):
-        top_words_dic[id2token[corpus_tfidf_current[i][0]]] = corpus_tfidf_current[i][1]
+        top_words_dic[id2token[corpus_tfidf_current[i][0]]] = 1
         top_words_list.append(id2token[corpus_tfidf_current[i][0]])
-    return top_words_list
+    return top_words_dic,top_words_list,
 
 
 def get_tf_idf_words_in_all_text(dic, tfidf_model, text_list):
+    word_dic = {}
     i = 0
     top_words_list_all = []
     for text in text_list:
-        i += 1
-        print(i)
         current_word_dic,current_word_list = get_tf_idf_words_in_one_text(dic, tfidf_model, text)
+        word_dic = dict(Counter(current_word_dic) + Counter(word_dic))
         top_words_list_all.append(current_word_list)
-    return top_words_list_all
+    word_dic = sorted(word_dic, key=lambda item: item[1], reverse=True)
+
+    for item in top_words_list_all:
+        i+=1
+        print(i)
+        print(item)
+        print("---------------")
+    for item in word_dic.items():
+        print(item)
+    return top_words_list_all, word_dic
 
 
 def get_depen_plu_tfidf_in_one_pom(inner_pom_file_dir,dic,tfidf_model, text):
@@ -1072,7 +1298,8 @@ def get_depen_plu_tfidf_in_one_pom(inner_pom_file_dir,dic,tfidf_model, text):
     current_file_dir = os.path.join(STATIC_DIR, inner_pom_file_dir)
     tfidf_words = get_tf_idf_words_in_one_text(dic, tfidf_model, text)
     dependency_list = get_item_in_one_pom(inner_pom_file_dir,"dependency", "dependencies")
-    dependency_list.remove("junit")
+    if "junit_junit" in dependency_list:
+        dependency_list.remove("junit_junit")
     plugin_list = get_item_in_one_pom(inner_pom_file_dir,"plugin", "plugins")
     dependency_tfidf_words = list(tfidf_words) + dependency_list
     plugin_tfidf_words = list(tfidf_words) +  plugin_list
@@ -1096,6 +1323,25 @@ def get_depen_plu_tfidf_in_all_pom(pom_file_name_list):
     return dependency_tfidf_words_list,plugin_tfidf_words_list,dependency_list_all,plugin_list_all,tfidf_words_all
 
 
+def get_item_all_dict(pom_file_name_list,item_name,items_name):
+    item_dict_all = {}
+    item_list_all = get_item_in_all_pom(pom_file_name_list,item_name,items_name)
+    item_value_list = []
+    for item_list in item_list_all:
+        for item in item_list:
+            if item in item_dict_all.keys():
+                item_dict_all[item]+=1
+            else:
+                item_dict_all[item] = 1
+    item_dict_all=sorted(item_dict_all.items(), reverse=True, key=lambda k: k[1])
+    # for value in item_dict_all.values():
+    #     # print(item)
+    #     item_value_list.append(value)
+    # print(np.mean(item_value_list))
+    # print(np.median(item_value_list))
+    # print(len(item_dict_all))
+    print( item_dict_all[636])
+    return item_dict_all
 
 
 if __name__ == "__main__":
@@ -1107,29 +1353,36 @@ if __name__ == "__main__":
     # write_structure_info_list_to_file(structure_info_list, POM_STRUCTURE_INFO_FILE_NAME)
     # write_structure_info_list_to_file(pre_structure_info_list, PRE_POM_STRUCTURE_INFO_FILE_NAME)
 
-    # pom_file_name_list = get_all_pom_path(archetype_files_info_dict, False)
+    # compare_item_add_del_in_all_pom(archetype_files_info_dict,True )
+
+    # pom_file_name_list = get_all_pom_path(archetype_files_info_dict, True)
+    # get_item_all_dict(pom_file_name_list,"dependency", "dependencies")
+
     pom_file_name_list = get_all_two_pom_path(archetype_files_info_dict)
+    # get_all_flat_pom_tag(pom_file_name_list)
     # print(cal_item(pom_file_name_list, "dependency", "dependencies"))
     # description_in_all_pom = get_description_in_all_pom(pom_file_name_list)
     #
-    # lda = build_topicmodel(pom_file_name_list, 50)
-    # tf_idf_model(pom_file_name_list)
-    dependency_tfidf_words_list, plugin_tfidf_words_list, dependency_list_all, plugin_list_all, tfidf_words_all = get_depen_plu_tfidf_in_all_pom(pom_file_name_list)
+    # lda = build_topicmodel(pom_file_name_list, 100)
+    tf_idf_model(pom_file_name_list)
+
+    # dependency_tfidf_words_list, plugin_tfidf_words_list, dependency_list_all, plugin_list_all, tfidf_words_all = get_depen_plu_tfidf_in_all_pom(pom_file_name_list)
+
     # plugin_in_all_pom = get_item_in_all_pom(pom_file_name_list, "plugin", "plugins")
-    # dependency_in_all_pom = get_item_in_all_pom(pom_file_name_list, "dependency", "dependencies")
+    # dependency_in_all_pom = get_item_in_all_pom(pom_file_name_list, "dependency", "dependencies","dependencyManagement")
     # plugin_dependency_in_all_pom = plugin_in_all_pom + dependency_in_all_pom
 
 
-    L, supportData = self_apriori(dependency_tfidf_words_list, 0.01)
+    # L, supportData = self_apriori(dependency_in_all_pom, 0.01)
     # for item in supportData:
     #     print(item)
-    bigRuleList = gen_rule(L, supportData, 0.3, tfidf_words_all,dependency_list_all)
-    # # get_association_rule(dependency_in_all_pom)
+    # bigRuleList = gen_rule(L, supportData, 0.5)
+    # get_association_rule(dependency_in_all_pom)
     #
     # # rules_sorted = my_apriori(tag_in_all_pom,)
 
-    for r in bigRuleList:
-        print(r, "\n")
+    # for r in bigRuleList:
+    #     print(r, "\n")
 
     # write_list_in_list_to_file(bigRuleList, TAG_APRIORI_DIR_NAME)
     # for pom_file_name in pom_file_name_list:
@@ -1149,7 +1402,7 @@ if __name__ == "__main__":
     # write_tag_name_dict_to_file(tag_name_dict_sorted_list, INNER_POM_TAG_NAME_DICT_NAME)
 
     # diff_tag_dic = compare_all_pom(archetype_files_info_dict, True)
-    # # print(diff_tag_dic)
+    # print(diff_tag_dic)
     # write_dic_to_file(diff_tag_dic, VERSION_CHANGE_FILE_NAME)
 
     # list = [["batsà", "a"], ["b"]]
