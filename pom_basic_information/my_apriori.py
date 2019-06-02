@@ -148,3 +148,10 @@ def gen_rule(L, supportData, minConf=0.1,word_list = [], other_list = []):
             calcConf(freqSet, all_subset, supportData, bigRuleList, word_list, other_list, minConf)
     return bigRuleList
 
+
+def get_association_rule(dataset, minSupport=0.01, minConf=0.5):
+    L, supportData = self_apriori(dataset, minSupport)
+    rule = gen_rule(L, supportData, minConf)
+    for r in rule:
+        print(r, "\n")
+    return rule
