@@ -6,35 +6,10 @@ from constant import ARCHETYPE_FILES_INFO, PARENT_POM_DIR, POM_DIR, TAG_NAME_DIC
     VERSION_CHANGE_DIR, DEPENDENCY_DIR, PLUGIN_DIR, DEPENDENCY_PLUGIN_DIR, TAG_DIR, TOKEN_DIR
 import bs4
 from bs4 import BeautifulSoup
-import numpy as np
-import unicodedata
-# from akapriori import apriori
-from pom_basic_information.my_apriori import self_apriori,gen_rule
-from scipy.stats import mannwhitneyu
-import re
-import sys
-import codecs
-import gensim
-import nltk
-from nltk.tokenize import word_tokenize
-import string
-from gensim import corpora, models, similarities
-from nltk.corpus import stopwords
-from nltk import word_tokenize, pos_tag
-from nltk.corpus import wordnet
-from gensim.models.ldamodel import LdaModel
-from nltk.stem import WordNetLemmatizer
-from collections import Counter
-import javalang
-import copy
-import datetime
-import time
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 
-from pom_basic_information.draw_figures import get_pom_date
 from pom_basic_information.pom_flat_tag import flat_pom
-from pom_basic_information.read_file import filter_pom_version, get_dependency_list, get_plugin_list
+from pom_basic_information.read_file import filter_pom_version, get_dependency_list, get_plugin_list, read_json_file
+import numpy as np
 
 try:
     import xml.etree.cElementTree as ET
@@ -73,6 +48,7 @@ def compare_dependency_list(dependency_list1, dependency_list2, diff_tag_dic):
 def compare_item_add_del(item_list1, item_list2):
     item_del_list = []
     item_add_list = []
+    basic_num = len(item_list1)
     for item in item_list1:
         item_del_list.append(item[0])
     for item in item_list2:
@@ -89,7 +65,7 @@ def compare_item_add_del(item_list1, item_list2):
                 if item1[0] == item2[0]:
                     if item2[0] in item_add_list:
                         item_add_list.remove(item2[0])
-    return [item_del_list, len(item_del_list), item_add_list, len(item_add_list)]
+    return [item_del_list, len(item_del_list), item_add_list, len(item_add_list),basic_num]
 
 
 def compare_item_add_del_in_all_pom(archetype_files_info_dict, is_inner):
@@ -134,7 +110,7 @@ def compare_item_add_del_in_all_pom(archetype_files_info_dict, is_inner):
                         num += 1
                         if num % 100 == 0:
                             print(num, "\n")
-                        dependency_del_list, dependency_del_num, dependency_add_list, dependency_add_num = compare_item_add_del(dependency_list1, dependency_list2)
+                        dependency_del_list, dependency_del_num, dependency_add_list, dependency_add_num,basic_num = compare_item_add_del(dependency_list1, dependency_list2)
                     # # if dependency_del_num > 0 and dependency_add_num > 0 :
                     #     if dependency_del_num == dependency_add_num:
                     #         add_del +=1
@@ -147,28 +123,27 @@ def compare_item_add_del_in_all_pom(archetype_files_info_dict, is_inner):
                     # dependency_comapre_list.append([dependency_del_list, dependency_del_num, dependency_add_list, dependency_add_num])
                     # dependency_del_dict_all = dict(Counter(dependency_del_dict_all) + Counter(dependency_del_list))
                     # dependency_add_dict_all = dict(Counter(dependency_add_dict_all) + Counter(dependency_add_list))
-                        if dependency_del_num > 0:
-                            dependency_del_num_list.append(dependency_del_num)
-                            current_del_time = get_pom_date(pom2_path)
-                            dependency_del_time_list.append(current_del_time)
+                        if dependency_del_num > 0 and basic_num > 0:
+                            dependency_del_num_list.append(dependency_del_num/basic_num)
+                            # current_del_time = get_pom_date(pom2_path)
+                            # dependency_del_time_list.append(current_del_time)
 
-                        if  dependency_add_num > 0:
-                            dependency_add_num_list.append(dependency_add_num)
-                            current_add_time = get_pom_date(pom2_path)
-                            dependency_add_time_list.append(current_add_time)
+                        if  dependency_add_num > 0 and basic_num > 0:
+                            dependency_add_num_list.append(dependency_add_num/basic_num)
+                            # current_add_time = get_pom_date(pom2_path)
+                            # dependency_add_time_list.append(current_add_time)
 
                     # if "junit_junit" in dependency_del_list:
                     #     print(pom1_file_dir, "    ", pom2_file_dir)
                     #     print(pre_dependency_del_list, "\n", pre_dependency_add_list)
 
-                    # plugin_list1 = get_plugin_list(pom1_file_dir)
-                    # plugin_list2 = get_plugin_list(pom2_file_dir)
-                    # if plugin_list1 and plugin_list2 and len(plugin_list1) != 0 and len(plugin_list2) != 0:
-                    #     num += 1
-                    #     if num % 100 == 0:
-                    #         print(num, "\n")
-                    #     plugin_del_list, plugin_del_num, plugin_add_list, plugin_add_num = compare_item_add_del(
-                    #         plugin_list1, plugin_list2)
+                    plugin_list1 = get_plugin_list(pom1_file_dir)
+                    plugin_list2 = get_plugin_list(pom2_file_dir)
+                    if plugin_list1 and plugin_list2 and len(plugin_list1) != 0 and len(plugin_list2) != 0:
+                        num += 1
+                        if num % 100 == 0:
+                            print(num, "\n")
+                        plugin_del_list, plugin_del_num, plugin_add_list, plugin_add_num,basic_num = compare_item_add_del(plugin_list1, plugin_list2)
                         # if plugin_del_num > 0 or plugin_add_num > 0:
                         #     plugin_comapre_list.append([plugin_del_list, plugin_del_num, plugin_add_list, plugin_add_num])
                         # if plugin_del_num > 0 and plugin_add_num > 0:
@@ -182,13 +157,13 @@ def compare_item_add_del_in_all_pom(archetype_files_info_dict, is_inner):
                         # elif plugin_add_num > 0:
                         #     add_num += 1
                         # plugin_del_dict_all = dict(Counter(plugin_del_dict_all) + Counter(plugin_del_list))
-                        # if plugin_del_num > 0:
-                        #     plugin_del_num_list.append(plugin_del_num)
+                        if plugin_del_num > 0 and basic_num > 0:
+                            plugin_del_num_list.append(plugin_del_num/basic_num)
                         #     current_del_time = get_pom_date(pom2_path)
                         #     plugin_del_time_list.append(current_del_time)
                         # plugin_add_dict_all = dict(Counter(plugin_add_dict_all) + Counter(plugin_add_list))
-                        # if plugin_add_num > 0:
-                        #     plugin_add_num_list.append(plugin_add_num)
+                        if plugin_add_num > 0 and basic_num > 0:
+                            plugin_add_num_list.append(plugin_add_num/basic_num)
                         #     current_add_time = get_pom_date(pom2_path)
                         #     plugin_add_time_list.append(current_add_time)
     # dependency_del_dict_all= sorted(dependency_del_dict_all.items(), reverse=True, key=lambda k: k[1])
@@ -199,36 +174,41 @@ def compare_item_add_del_in_all_pom(archetype_files_info_dict, is_inner):
     # for item in dependency_comapre_list:
     #     print(item)
     # write_double_list_to_file(dependency_comapre_list,DEPENDENCY_ADD_DEL_DIR)
-    # print("dependency del")
+    print("dependency del")
     # for item in dependency_del_dict_all:
     #     print(item)
-    # print(np.median(dependency_del_num_list))
-    # print(np.mean(dependency_del_num_list))
+    print(np.max(dependency_del_num_list))
+    print(np.median(dependency_del_num_list))
+    print(np.mean(dependency_del_num_list))
     # print(num)
-    # print("dependency add")
+    print("dependency add")
     # for item in dependency_add_dict_all:
     #     print(item)
-    # print(np.median(dependency_add_num_list))
-    # print(np.mean(dependency_add_num_list))
+    print(np.max(dependency_add_num_list))
+    print(np.median(dependency_add_num_list))
+    print(np.mean(dependency_add_num_list))
     # print("plugin")
     # for item in plugin_comapre_list:
     #     print(item)
-    # print("plugin del")
+    print("plugin del")
     # for item in plugin_del_dict_all:
     #     print(item)
-    # print(np.median(plugin_del_num_list))
-    # print(np.mean(plugin_del_num_list))
-    # print("plugin add")
+    print(np.max(plugin_del_num_list))
+    print(np.median(plugin_del_num_list))
+    print(np.mean(plugin_del_num_list))
+    print("plugin add")
     # for item in plugin_add_dict_all:
     #     print(item)
-    # print(np.median(plugin_add_num_list))
-    # print(np.mean(plugin_add_num_list))
+    print(np.max(plugin_add_num_list))
+    print(np.median(plugin_add_num_list))
+    print(np.mean(plugin_add_num_list))
     # print(add_del)
     # print(del_num)
     # print(add_num)
     # print(sum_equ)
     # return [ plugin_del_num_list, plugin_add_num_list],[plugin_del_time_list,plugin_add_time_list]
-    return [dependency_del_num_list,  dependency_add_num_list], [dependency_del_time_list, dependency_add_time_list]
+    # return [dependency_del_num_list,  dependency_add_num_list], [dependency_del_time_list, dependency_add_time_list]
+    return dependency_del_num_list, dependency_add_num_list, plugin_del_num_list, plugin_add_num_list
 
 
 def compare_plugin_list(plugin_list1, plugin_list2, diff_tag_dic):
@@ -330,3 +310,8 @@ def compare_all_pom(archetype_files_info_dict, is_inner):
     # print(diff_tag_dic)
     print(num)
     return diff_tag_dic
+
+
+if __name__ == "__main__":
+    archetype_files_info_dict = read_json_file(ARCHETYPE_FILES_INFO)
+    compare_item_add_del_in_all_pom(archetype_files_info_dict, True)

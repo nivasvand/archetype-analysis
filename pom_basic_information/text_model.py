@@ -283,7 +283,6 @@ def get_methods(code: str):
         code = re.sub(r'^(package)(.*-.*)(;)$', r'\1 test\3', code, flags=re.MULTILINE)
         code = re.sub(r'(".*)#if.*#end', r'\1test', code)
         code = re.sub(r'#if.*#end', '"test"', code)
-
         tree = javalang.parse.parse(code)
         return [node.name for _, node in tree.filter(javalang.tree.MethodDeclaration)]
     except:
@@ -453,3 +452,5 @@ def get_submodel_tf_idf(submodel_text_all2, model_submodel_dict_all,archetype_fi
     # tfidf = models.TfidfModel(basic_corpus)
     # get_tf_idf_words_in_all_text(dic, tfidf,  submodel_text_all2_filter_words, model_submodel_dict_all)
     # return tfidf, dic,  submodel_text_all2_filter_words, basic_corpus
+
+

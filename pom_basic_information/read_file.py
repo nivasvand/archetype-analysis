@@ -264,7 +264,20 @@ def get_test_data(structure_info_list):
     return data_outer_has_module, data_outer_no_module
 
 
-def get_item_in_one_pom(pom_file_name, item_name, items_name, items_name_plus):
+def get_item_name(is_detail,name_dict):
+    item_groupId = name_dict["groupId"]
+    item_artifactId = name_dict["artifactId"]
+    item_name = ""
+    if item_groupId:
+        if is_detail:
+            if item_artifactId:
+                item_name = item_groupId.text + "_" + item_artifactId.text
+        else:
+            item_name = item_groupId.text
+    return item_name
+
+
+def get_item_in_one_pom(pom_file_name, item_name, items_name, items_name_plus, is_detail=True):
     current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
     item_in_one_pom = []
     if os.path.isfile(current_file_dir):
@@ -277,10 +290,12 @@ def get_item_in_one_pom(pom_file_name, item_name, items_name, items_name_plus):
         if items_plus:
             item_raw_list = item_raw_list + items_plus.find_all(item_name)
         for item in item_raw_list:
-            item_groupId = item.find("groupId")
-            item_artifactId = item.find("artifactId")
-            if item_groupId and item_artifactId:
-                item_name = item_groupId.text + "_" + item_artifactId.text
+            current_name_dict = {
+                "groupId": item.find("groupId"),
+                "artifactId": item.find("artifactId")
+            }
+            item_name = get_item_name(is_detail,current_name_dict )
+            if item_name:
                 item_in_one_pom.append(item_name)
             # if item_groupId:
             #     item_name = item_groupId.text
@@ -292,10 +307,10 @@ def get_item_in_one_pom(pom_file_name, item_name, items_name, items_name_plus):
     return item_in_one_pom
 
 
-def get_item_in_all_pom(pom_file_name_list, item_name, items_name, items_name_plus):
+def get_item_in_all_pom(pom_file_name_list, item_name, items_name, items_name_plus,is_detail=True):
     item_in_all_pom = []
     for pom_file_name in pom_file_name_list:
-        current_item_in_one_pom = get_item_in_one_pom(pom_file_name, item_name, items_name, items_name_plus)
+        current_item_in_one_pom = get_item_in_one_pom(pom_file_name, item_name, items_name, items_name_plus,is_detail)
         if len(current_item_in_one_pom) > 0:
             item_in_all_pom.append(current_item_in_one_pom)
     return item_in_all_pom
@@ -405,10 +420,103 @@ def get_plugin_list(pom_file_dir):
         return None
 
 
+def get_unusable_pom_path(is_inner):
+    archetype_files_info_dict = read_json_file(ARCHETYPE_FILES_INFO)
+    pom_file_name_list = get_all_pom_path(archetype_files_info_dict, is_inner)
+    num = 0
+    for pom_file_name in  pom_file_name_list :
+        current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
+        if os.path.isfile(current_file_dir):
+          num +=1
+        else:
+            print(current_file_dir)
+    print(num)
+
+
+def check_pom_valid(is_inner):
+    archetype_files_info_dict = read_json_file(ARCHETYPE_FILES_INFO)
+    pom_file_name_list = get_all_pom_path(archetype_files_info_dict, is_inner)
+    no_valid_num = 0
+    has_parent_num = 0
+    total = 0
+    for pom_file_name in pom_file_name_list:
+        current_file_dir = os.path.join(STATIC_DIR, pom_file_name)
+        total += 1
+        if os.path.isfile(current_file_dir):
+            soup = BeautifulSoup(open(current_file_dir, 'rt', encoding='latin1'), "xml")
+            is_valid = soup.find_all("project")
+            if len(is_valid) == 0:
+                print(current_file_dir)
+                no_valid_num += 1
+            else:
+                parent = soup.find_all("parent")
+                if len( parent) > 0:
+                    has_parent_num +=1
+                    print(has_parent_num)
+                    print(parent)
+    # print(no_valid_num, has_parent_num, total)
+    return no_valid_num,has_parent_num,total
+
+
+def cal_submodel_for_one(pom_file_name):
+    current_path = os.path.join(STATIC_DIR, pom_file_name).split("/pom.xml")[0]
+    first_dir_files = os.listdir(current_path)
+    pom_num = 0
+
+    for file in first_dir_files:
+        m = os.path.join(current_path, file)
+        if (os.path.isdir(m)):
+            second_dirs = os.listdir(m)
+            for file in second_dirs:
+                if file.endswith('pom.xml'):
+                    pom_num += 1
+
+    return pom_num
+
+
+def has_submodel(pom_file_name):
+    # current_path = os.path.join(STATIC_DIR, current_file_dir).split("/archetype-resources/pom.xml")[0]
+    current_path = os.path.join(STATIC_DIR, pom_file_name).split("/pom.xml")[0]
+    pom_num = 0
+    submodel_name_list = []
+
+    for root, dirs, files in os.walk(current_path):  # os.walk获取所有的目录
+        for file in files:
+            file_name = os.path.join(root, file)
+            if file_name.endswith('pom.xml'):
+                pom_num += 1
+                submodel_name_list.append(file_name)
+
+    if pom_num > 6:
+        print(submodel_name_list)
+    return pom_num
+
+
+def cal_archetype_has_submodel():
+    archetype_files_info_dict = read_json_file(ARCHETYPE_FILES_INFO)
+    pom_file_name_list = get_all_pom_path(archetype_files_info_dict, True)
+    has_submodel_num = 0
+    submodel_num_list = []
+
+    for pom_file_name in pom_file_name_list:
+        current_submodel_num =  cal_submodel_for_one(pom_file_name)
+        if current_submodel_num > 0:
+            print(pom_file_name)
+            print(current_submodel_num)
+            submodel_num_list.append((current_submodel_num))
+            has_submodel_num +=1
+
+    median = np.median(submodel_num_list)
+    mean = np.mean(submodel_num_list)
+
+    return median, mean,has_submodel_num
+
+
+
 if __name__ == "__main__":
     # num = 0
     # inherit = 0
-    archetype_files_info_dict = read_json_file(ARCHETYPE_FILES_INFO)
+    # archetype_files_info_dict = read_json_file(ARCHETYPE_FILES_INFO)
     # structure_info_list = get_structure_info()
     # pre_structure_info_list = pre_structure_info_list(structure_info_list)
     # write_structure_info_list_to_file(structure_info_list, POM_STRUCTURE_INFO_FILE_NAME)
@@ -491,3 +599,6 @@ if __name__ == "__main__":
     # get_submodel_tf_idf(submodel_text_all2, model_submodel_dict_all)
 
 
+    # get_unusable_pom_path(False)
+    # print(check_pom_valid(False))
+    print(cal_archetype_has_submodel())
